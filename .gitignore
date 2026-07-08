@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.key
+*.pem
+
+# data: 모든 실제 내용물 제외, 폴더와 .gitkeep만 허용
+data/**/*
+!data/**/
+!data/**/.gitkeep
+
+# results: 모든 실제 내용물 제외, 폴더와 .gitkeep만 허용
+results/**/*
+!results/**/
+!results/**/.gitkeep
+
+# Temporary
+tmp/
+temp/
+*.log
