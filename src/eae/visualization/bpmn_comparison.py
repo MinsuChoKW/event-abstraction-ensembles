@@ -452,10 +452,11 @@ def save_bpmn_visualizations(
     rank: int = 1,
 ) -> Dict[str, Path]:
     """
-    Render ORG and ABS BPMN models and save:
+    Render ORG and ABS BPMN models and save only:
       - base PNGs
       - DOT/layout/meta assets
-      - plain ORG-vs-ABS comparison image
+
+    No side-by-side comparison image is created.
     """
     resolved = resolve_bpmn_model_paths(
         cfg,
@@ -483,12 +484,6 @@ def save_bpmn_visualizations(
         output_meta_json=output_dir / "ABS_bpmn_base_meta.json",
     )
 
-    comparison_png = build_side_by_side_comparison(
-        org_assets["png"],
-        abs_assets["png"],
-        output_dir / f"BPMN_comparison_rank{rank}.png",
-    )
-
     return {
         "run_dir": run_dir,
         "output_dir": output_dir,
@@ -502,5 +497,5 @@ def save_bpmn_visualizations(
         "abs_dot": abs_assets["dot"],
         "abs_layout_json": abs_assets["layout_json"],
         "abs_meta_json": abs_assets["meta_json"],
-        "comparison_png": comparison_png,
     }
+

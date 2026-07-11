@@ -54,7 +54,6 @@ def main() -> None:
     args = parse_args()
     cfg = load_config(args.config)
 
-    # Existing ABS visualization pipeline.
     abs_outputs = save_abs_bpmn_overlay_visualization(
         cfg,
         k=args.k,
@@ -62,8 +61,6 @@ def main() -> None:
         rank=args.rank,
     )
 
-    # New ORG pattern-region pipeline.
-    # Only the three final region PNGs are persisted by this stage.
     region_outputs = save_org_pattern_region_overlays(
         cfg,
         k=args.k,
@@ -72,58 +69,57 @@ def main() -> None:
     )
 
     print("=" * 80)
-    print("[VISUALIZATION COMPARISON COMPLETED]")
+    print("[VISUALIZATION COMPLETED]")
     print("=" * 80)
 
+    print("[BASE BPMN IMAGES]")
+    print(f"ORG BPMN PNG           : {abs_outputs['org_png']}")
+    print(f"ABS BPMN PNG           : {abs_outputs['abs_png']}")
+
+    print("-" * 80)
     print("[ABS LABEL-PREFIX OVERLAY]")
+    print(f"ABS overlay PNG        : {abs_outputs['abs_overlay_png']}")
+    print(f"Red prefixes           : {abs_outputs['red_prefixes']}")
+    print(f"Blue prefixes          : {abs_outputs['blue_prefixes']}")
+    print(f"Red nodes              : {abs_outputs['count_red']}")
+    print(f"Blue nodes             : {abs_outputs['count_blue']}")
     print(
-        f"ABS overlay PNG        : "
-        f"{abs_outputs['abs_overlay_png']}"
-    )
-    print(
-        f"Overlay comparison PNG : "
-        f"{abs_outputs['overlay_comparison_png']}"
+        f"Missing layout nodes   : "
+        f"{abs_outputs['count_missing_layout']}"
     )
 
     print("-" * 80)
     print("[ORG PATTERN REGIONS]")
-    print(
-        f"G region PNG           : "
-        f"{region_outputs['g_region_png']}"
-    )
-    print(
-        f"Neutral region PNG     : "
-        f"{region_outputs['neutral_region_png']}"
-    )
-    print(
-        f"C region PNG           : "
-        f"{region_outputs['c_region_png']}"
-    )
+    print(f"G region PNG           : {region_outputs['g_region_png']}")
+    print(f"Neutral region PNG     : {region_outputs['neutral_region_png']}")
+    print(f"C region PNG           : {region_outputs['c_region_png']}")
+    print(f"Red prefixes           : {region_outputs['red_prefixes']}")
+    print(f"Blue prefixes          : {region_outputs['blue_prefixes']}")
 
     print("-" * 80)
     print("[MATCH SUMMARY]")
     print(
-        f"Unique C segments      : "
+        f"Unique red/C segments  : "
         f"{region_outputs['n_unique_c_segments']}"
     )
     print(
-        f"Unique G segments      : "
+        f"Unique blue/G segments : "
         f"{region_outputs['n_unique_g_segments']}"
     )
     print(
-        f"Matched C segments     : "
+        f"Matched red/C segments : "
         f"{region_outputs['matched_c_segments']}"
     )
     print(
-        f"Matched G segments     : "
+        f"Matched blue/G segments: "
         f"{region_outputs['matched_g_segments']}"
     )
     print(
-        f"Unmatched C segments   : "
+        f"Unmatched red/C        : "
         f"{region_outputs['unmatched_c_segments']}"
     )
     print(
-        f"Unmatched G segments   : "
+        f"Unmatched blue/G       : "
         f"{region_outputs['unmatched_g_segments']}"
     )
 
@@ -155,9 +151,7 @@ def main() -> None:
                 "neutral_region_png",
                 "c_region_png",
             ):
-                Image.open(
-                    region_outputs[key]
-                ).show()
+                Image.open(region_outputs[key]).show()
         except Exception as exc:
             print(
                 "[WARN] Could not open region images automatically: "

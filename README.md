@@ -1,6 +1,6 @@
 # Event Abstraction Ensembles
 
-```text![Framnwork Figure](docs/figures/Framework_Figure.png)```
+![Framnwork Figure](docs/figures/Framework_Figure.png)
 
 This repository contains the implementation of the event abstraction ensemble framework for process mining experiments.
 
@@ -55,6 +55,7 @@ event-abstraction-ensembles/
 
 `data/` and `results/` are kept as local directories; only the folder structure is tracked in GitHub.
 
+
 ## Datasets
 
 This project uses the following public event logs:
@@ -87,6 +88,47 @@ dataset:
 
 model_based:
   raw_lpm_dir: ...
+```
+
+## LPM Input Preparation
+
+Model-based LPM inputs are prepared with ProM.
+
+First, run the following ProM action:
+
+```text
+Search for Local Process Models
+```
+
+Using the default setting, this project assumes that the top 100 LPMs are selected.
+
+After the LPMs are discovered, use:
+
+```text
+Export results as Local Process Model Ranking
+```
+
+Then export the generated `Local Process Model Ranking` data to disk and use it as the model-based LPM input for this project.
+
+Export the resulting files and place them under the `raw_lpm_dir` path specified in the YAML config.
+
+Example for BPI 2012:
+
+```text
+data/bpi2012/raw/LPM_PN_Set/
+```
+
+In the Colab project directory, this corresponds to:
+
+```text
+/content/drive/MyDrive/SJ_Lab/github_repo_ver/project_root/data/<bpi2012 or bpic2015>/raw/LPM_PN_Set/
+```
+
+The corresponding config entry is:
+
+```yaml
+model_based:
+  raw_lpm_dir: data/bpi2012/raw/LPM_PN_Set
 ```
 
 ## Main Pipeline
@@ -191,7 +233,16 @@ PYTHONPATH=src python subscript/abstraction_comparison.py \
   --rank 1
 ```
 
-Outputs basic descriptive figures and tables, including case-length distribution, inter-event-time distribution, log summary, and BPMN size summary.
+This script generates the descriptive analysis outputs used for:
+
+```text
+Table 1
+Figure 2
+Figure 3
+Table 2
+```
+
+The outputs include case-length distribution, inter-event-time distribution, log summary, and BPMN size summary.
 
 ### Jump Sweep and Method Comparison
 
@@ -219,14 +270,19 @@ PYTHONPATH=src python subscript/run_method_comparison.py \
   --lpm-compare-jump 4
 ```
 
-Generates paper-level comparison outputs:
+This script generates the paper-level jump sweep and method comparison outputs used for:
 
-fixed-K jump allowance sweep figure
-per-case alignment cost distribution table and figure
-case-length-stratified alignment cost table and figure
+```text
+Figure 4
+Figure 5
+Figure 6
+```
 
-The sweep figure uses all jump values listed in the Ensemble and Session configs.
-The detailed method comparison uses the selected jump values provided by the --*-compare-jump arguments.
+The outputs include the fixed-K jump allowance sweep figure, per-case alignment cost distribution table and figure, and case-length-stratified alignment cost table and figure.
+
+The sweep figure uses all jump values listed in the Ensemble and Session configs.  
+The detailed method comparison uses the selected jump values provided by the `--*-compare-jump` arguments.
+
 ### BPMN Visualization
 
 ```bash
@@ -247,8 +303,15 @@ PYTHONPATH=src python subscript/visualization_comparison.py \
   --rank 1
 ```
 
-Generates BPMN comparison visualizations, including original and abstracted model views and pattern-region overlays.
+This script generates the BPMN visualization outputs used for:
 
+```text
+Figure 7
+Figure 8
+Figure 9
+```
+
+The outputs include the original BPMN model image, abstracted BPMN model image, abstraction-label overlay, and pattern-region overlays.
 ## Notes
 
 Large datasets, intermediate files, and experiment results are not tracked by Git.

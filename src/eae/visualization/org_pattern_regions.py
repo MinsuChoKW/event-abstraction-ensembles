@@ -25,6 +25,93 @@ from .bpmn_comparison import (
 )
 
 
+
+# ============================================================
+# Label-family prefix helpers
+# ============================================================
+
+def _normalize_prefixes(
+    *values: Any,
+) -> tuple[str, ...]:
+    prefixes: list[str] = []
+
+    for value in values:
+        if value is None:
+            continue
+
+        if isinstance(value, (list, tuple, set)):
+            candidates = value
+        else:
+            candidates = [value]
+
+        for candidate in candidates:
+            text = str(candidate).strip()
+
+            if not text:
+                continue
+
+            if text not in prefixes:
+                prefixes.append(text)
+
+    return tuple(prefixes)
+
+
+def _get_family_prefixes(
+    cfg: Dict[str, Any],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """
+    Red bucket:
+        instance/session-based labels.
+        Supports current config prefix, plus legacy C/S.
+
+    Blue bucket:
+        model/LPM-based labels.
+        Supports current config prefix, plus legacy G.
+    """
+    label_prefix = (
+        cfg.get("abstraction_source", {})
+        .get("label_prefix", {})
+    )
+
+    session_prefix = label_prefix.get("session")
+    lpm_prefix = label_prefix.get("lpm")
+
+    red_prefixes = _normalize_prefixes(
+        "S",
+    )
+    blue_prefixes = _normalize_prefixes(
+        lpm_prefix,
+        "G",
+    )
+
+    return red_prefixes, blue_prefixes
+
+
+def _label_source_bucket(
+    label: Any,
+    *,
+    red_prefixes: tuple[str, ...],
+    blue_prefixes: tuple[str, ...],
+) -> str | None:
+    text = str(label).strip()
+
+    if any(
+        text.startswith(prefix)
+        for prefix in red_prefixes
+        if prefix
+    ):
+        return "C"
+
+    if any(
+        text.startswith(prefix)
+        for prefix in blue_prefixes
+        if prefix
+    ):
+        return "G"
+
+    return None
+
+
 # ============================================================
 # Public entry point
 # ============================================================
@@ -46,16 +133,17 @@ def save_org_pattern_region_overlays(
       - Neutral_region_30_70_object_count.png
       - C_region_70_100_object_count.png
 
-    All BPMN render assets used during the calculation are created in a
-    temporary directory and deleted automatically.
+    C bucket means red/session-side labels.
+    G bucket means blue/LPM-side labels.
 
-    Object counts are obtained directly from structurally matched pattern
-    segments, so no per-segment PNG files are created.
+    Supports both legacy C/G labels and config-based S/G labels.
     """
     if not 0.0 <= g_max <= c_min <= 1.0:
         raise ValueError(
             "Thresholds must satisfy 0 <= g_max <= c_min <= 1."
         )
+
+    red_prefixes, blue_prefixes = _get_family_prefixes(cfg)
 
     resolved = _resolve_inputs(
         cfg,
@@ -76,6 +164,8 @@ def save_org_pattern_region_overlays(
         resolved["selected_combinations"],
         case_sequences=case_sequences,
         rank=rank,
+        red_prefixes=red_prefixes,
+        blue_prefixes=blue_prefixes,
     )
 
     with tempfile.TemporaryDirectory(
@@ -109,6 +199,8 @@ def save_org_pattern_region_overlays(
         ) = _count_pattern_objects(
             unique_segments_by_label,
             matcher=matcher,
+            red_prefixes=red_prefixes,
+            blue_prefixes=blue_prefixes,
         )
 
         c_nodes, n_nodes, g_nodes = _split_object_sets_3way(
@@ -186,6 +278,32 @@ def save_org_pattern_region_overlays(
 
         base_img.close()
 
+    n_unique_c_segments = int(
+        sum(
+            len(segments)
+            for label, segments in unique_segments_by_label.items()
+            if _label_source_bucket(
+                label,
+                red_prefixes=red_prefixes,
+                blue_prefixes=blue_prefixes,
+            )
+            == "C"
+        )
+    )
+
+    n_unique_g_segments = int(
+        sum(
+            len(segments)
+            for label, segments in unique_segments_by_label.items()
+            if _label_source_bucket(
+                label,
+                red_prefixes=red_prefixes,
+                blue_prefixes=blue_prefixes,
+            )
+            == "G"
+        )
+    )
+
     return {
         **output_paths,
         "output_dir": output_dir,
@@ -193,20 +311,10 @@ def save_org_pattern_region_overlays(
         "org_bpmn": resolved["org_bpmn"],
         "selected_combinations": resolved["selected_combinations"],
         "activity_map_file": resolved["activity_map_file"],
-        "n_unique_c_segments": int(
-            sum(
-                len(segments)
-                for label, segments in unique_segments_by_label.items()
-                if label.startswith("C")
-            )
-        ),
-        "n_unique_g_segments": int(
-            sum(
-                len(segments)
-                for label, segments in unique_segments_by_label.items()
-                if label.startswith("G")
-            )
-        ),
+        "red_prefixes": red_prefixes,
+        "blue_prefixes": blue_prefixes,
+        "n_unique_c_segments": n_unique_c_segments,
+        "n_unique_g_segments": n_unique_g_segments,
         "matched_c_segments": match_stats["matched_c_segments"],
         "matched_g_segments": match_stats["matched_g_segments"],
         "unmatched_c_segments": match_stats["unmatched_c_segments"],
@@ -489,17 +597,20 @@ def _infer_edge_span(
     return start, end
 
 
+
 def _extract_unique_used_segments(
     selected_path: str | Path,
     *,
     case_sequences: Dict[str, list[str]],
     rank: int,
+    red_prefixes: tuple[str, ...],
+    blue_prefixes: tuple[str, ...],
 ) -> Dict[str, list[list[str]]]:
     """
-    Reconstruct unique used segments per selected C/G label.
+    Reconstruct unique used segments per selected label.
 
-    Each unique sequence for a label contributes once, matching the
-    semantics of the earlier per-segment-image pipeline.
+    Red/session-side labels and blue/LPM-side labels are detected
+    from config prefixes with legacy C/S/G support.
     """
     selected_path = Path(selected_path)
     unique_sets: Dict[str, set[tuple[str, ...]]] = defaultdict(set)
@@ -507,12 +618,14 @@ def _extract_unique_used_segments(
     with _open_jsonl_auto(selected_path) as handle:
         for line in handle:
             line = line.strip()
+
             if not line:
                 continue
 
             record = json.loads(line)
 
             record_rank = record.get("rank")
+
             if (
                 record_rank is not None
                 and int(record_rank) != int(rank)
@@ -531,16 +644,12 @@ def _extract_unique_used_segments(
             previous_end = 0
 
             edges = record.get("edges") or []
+
             for edge in edges:
                 label = edge.get(
                     "label",
                     edge.get("L", edge.get("l")),
                 )
-
-                if label is None:
-                    continue
-
-                label = str(label).strip()
 
                 start, end = _infer_edge_span(
                     edge,
@@ -554,9 +663,18 @@ def _extract_unique_used_segments(
                         end,
                     )
 
-                if not (
-                    label.startswith("C")
-                    or label.startswith("G")
+                if label is None:
+                    continue
+
+                label = str(label).strip()
+
+                if (
+                    _label_source_bucket(
+                        label,
+                        red_prefixes=red_prefixes,
+                        blue_prefixes=blue_prefixes,
+                    )
+                    is None
                 ):
                     continue
 
@@ -919,6 +1037,7 @@ class _StructuralBPMNMatcher:
 # Counting and three-way split
 # ============================================================
 
+
 def _count_pattern_objects(
     unique_segments_by_label: Dict[
         str,
@@ -926,6 +1045,8 @@ def _count_pattern_objects(
     ],
     *,
     matcher: _StructuralBPMNMatcher,
+    red_prefixes: tuple[str, ...],
+    blue_prefixes: tuple[str, ...],
 ) -> tuple[
     Counter,
     Counter,
@@ -946,12 +1067,10 @@ def _count_pattern_objects(
     }
 
     for label, segments in unique_segments_by_label.items():
-        source = (
-            "C"
-            if label.startswith("C")
-            else "G"
-            if label.startswith("G")
-            else None
+        source = _label_source_bucket(
+            label,
+            red_prefixes=red_prefixes,
+            blue_prefixes=blue_prefixes,
         )
 
         if source is None:
