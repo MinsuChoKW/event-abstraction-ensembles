@@ -1,6 +1,8 @@
 # Event Abstraction Ensembles
 
-![Framnwork Figure](docs/figures/Framework_Figure.png)
+<p align="center">
+  <img src="docs/figures/Framework_Figure.png" alt="Framework Figure" width="700">
+</p>
 
 This repository contains the implementation of the event abstraction ensemble framework for process mining experiments.
 
