@@ -1,4 +1,3 @@
-%%writefile scripts/run_pipeline.py
 from __future__ import annotations
 
 import argparse
@@ -465,18 +464,18 @@ def run_one_stage(
     print()
     print("=" * 100)
     print(
-        f"[Pipeline] Stage {stage_id}: "
+        f"[RunAll] Stage {stage_id}: "
         f"{stage_cfg['name']}"
     )
     print("=" * 100)
-    print(f"[Pipeline] command: {command_text}")
-    print(f"[Pipeline] log    : {log_path}")
+    print(f"[RunAll] command: {command_text}")
+    print(f"[RunAll] log    : {log_path}")
 
     started_at = utc_now_text()
     started_perf = time.perf_counter()
 
     if dry_run:
-        print("[Pipeline] DRY RUN: command not executed.")
+        print("[RunAll] DRY RUN: command not executed.")
 
         return {
             "stage": stage_id,
@@ -507,7 +506,7 @@ def run_one_stage(
             encoding="utf-8",
         ) as log_file:
             log_file.write(
-                f"[Pipeline] command: {command_text}\n"
+                f"[RunAll] command: {command_text}\n"
             )
             log_file.flush()
 
@@ -552,7 +551,7 @@ def run_one_stage(
     )
 
     print(
-        f"[Pipeline] Stage {stage_id} {status} "
+        f"[RunAll] Stage {stage_id} {status} "
         f"| duration={format_duration(duration)} "
         f"| return_code={return_code}"
     )
@@ -657,21 +656,21 @@ def run_pipeline(
     )
 
     print("=" * 100)
-    print("[Pipeline] Event Abstraction Ensemble Pipeline")
+    print("[RunAll] Event Abstraction Ensemble Pipeline")
     print("=" * 100)
-    print(f"[Pipeline] project root : {PROJECT_ROOT}")
-    print(f"[Pipeline] config       : {resolved_config_path}")
-    print(f"[Pipeline] dataset      : {dataset_name}")
+    print(f"[RunAll] project root : {PROJECT_ROOT}")
+    print(f"[RunAll] config       : {resolved_config_path}")
+    print(f"[RunAll] dataset      : {dataset_name}")
     print(
-        f"[Pipeline] stages       : "
+        f"[RunAll] stages       : "
         f"{', '.join(selected_stage_ids)}"
     )
     print(
-        f"[Pipeline] stop on error: "
+        f"[RunAll] stop on error: "
         f"{effective_stop_on_error}"
     )
-    print(f"[Pipeline] dry run      : {dry_run}")
-    print(f"[Pipeline] run directory: {pipeline_run_dir}")
+    print(f"[RunAll] dry run      : {dry_run}")
+    print(f"[RunAll] run directory: {pipeline_run_dir}")
 
     pipeline_started_at = utc_now_text()
     pipeline_started_perf = time.perf_counter()
@@ -717,7 +716,7 @@ def run_pipeline(
 
             if effective_stop_on_error:
                 print(
-                    f"[Pipeline] Stopping after failed "
+                    f"[RunAll] Stopping after failed "
                     f"stage {stage_id}."
                 )
                 break
@@ -787,26 +786,26 @@ def run_pipeline(
 
     print()
     print("=" * 100)
-    print("[Pipeline] Pipeline summary")
+    print("[RunAll] Pipeline summary")
     print("=" * 100)
     print(
-        f"[Pipeline] status   : "
+        f"[RunAll] status   : "
         f"{pipeline_status}"
     )
     print(
-        f"[Pipeline] completed: "
+        f"[RunAll] completed: "
         f"{n_completed}"
     )
     print(
-        f"[Pipeline] failed   : "
+        f"[RunAll] failed   : "
         f"{n_failed}"
     )
     print(
-        f"[Pipeline] duration : "
+        f"[RunAll] duration : "
         f"{format_duration(total_duration)}"
     )
     print(
-        f"[Pipeline] report   : "
+        f"[RunAll] report   : "
         f"{report_path}"
     )
 
@@ -822,8 +821,7 @@ def run_pipeline(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Execute the event-abstraction pipeline stages "
-            "defined in a YAML config."
+            "Run stages 01 through 07 using one YAML config."
         )
     )
 
