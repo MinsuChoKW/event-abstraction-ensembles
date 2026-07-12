@@ -1,3 +1,4 @@
+#/project_root/src/eae/information/method_comparison.py
 from __future__ import annotations
 
 import gzip
@@ -58,10 +59,14 @@ def _read_selected_rows(
     rank: int,
 ) -> pd.DataFrame:
     """
-    Read one rank from a Stage 04 selected-combinations JSONL file.
+    Read one selected rank from a Stage 04 selected-combinations JSONL file.
 
-    The reader accepts the common field variants used by older and
-    modularized experiment outputs.
+    Stage 04 stores one row per selected solution:
+      case_id, rank, case_len, total_cost, edges, ...
+
+    Therefore --rank 1 means:
+      use only the first-ranked decomposition per case,
+      exactly as Stage 05 discovery does.
     """
     selected_path = Path(selected_path)
 
@@ -90,12 +95,18 @@ def _read_selected_rows(
                 "case_id",
                 obj.get("case", obj.get("trace_id", line_number)),
             )
+
+            # IMPORTANT:
+            # Stage 04 solution_to_dict() writes "case_len", not "case_length".
             case_length = obj.get(
                 "n",
-                obj.get("case_length", obj.get("length")),
+                obj.get(
+                    "case_len",
+                    obj.get("case_length", obj.get("length")),
+                ),
             )
-            solved = bool(obj.get("solved", True))
 
+            solved = bool(obj.get("solved", True))
             edges = obj.get("edges") or []
 
             if obj.get("total_cost") is not None:
@@ -104,6 +115,8 @@ def _read_selected_rows(
                 align_cost = float(obj["align_cost"])
             elif obj.get("dsum") is not None:
                 align_cost = float(obj["dsum"])
+            elif obj.get("cost") is not None:
+                align_cost = float(obj["cost"])
             else:
                 align_cost = _edge_cost_sum(edges)
 
@@ -123,7 +136,16 @@ def _read_selected_rows(
                     "case_id": str(case_id),
                     "case_length": case_length,
                     "align_cost": align_cost,
-                    "n_segments": len(labels_used),
+                    "n_segments": int(
+                        obj.get("n_segments", len(labels_used))
+                    ),
+                    "terminal_pos": obj.get(
+                        "terminal_pos",
+                        obj.get("end_i"),
+                    ),
+                    "coverage": obj.get("coverage"),
+                    "coverage_ratio": obj.get("coverage_ratio"),
+                    "delta": obj.get("delta"),
                     "solved": solved,
                     "fixed_k": int(fixed_k),
                     "jump": int(jump),
@@ -148,6 +170,15 @@ def _read_selected_rows(
         errors="coerce",
     )
 
+    for col in ["terminal_pos", "coverage", "coverage_ratio", "delta"]:
+        if col in frame.columns:
+            frame[col] = pd.to_numeric(
+                frame[col],
+                errors="coerce",
+            )
+
+    before_filter = len(frame)
+
     frame = frame[
         frame["solved"]
         & frame["case_length"].notna()
@@ -156,13 +187,17 @@ def _read_selected_rows(
 
     if frame.empty:
         raise ValueError(
-            f"No valid solved rows were found in {selected_path}"
+            f"No valid solved rows were found in {selected_path}. "
+            f"rows_before_filter={before_filter}, "
+            f"case_length_notna="
+            f"{pd.to_numeric(pd.DataFrame(rows)['case_length'], errors='coerce').notna().sum()}, "
+            f"align_cost_notna="
+            f"{pd.to_numeric(pd.DataFrame(rows)['align_cost'], errors='coerce').notna().sum()}"
         )
 
     frame["case_length"] = frame["case_length"].astype(int)
     frame["align_cost"] = frame["align_cost"].astype(float)
 
-    # Defensive duplicate handling for files containing repeated case rows.
     frame = (
         frame.sort_values(["case_id", "align_cost"])
         .drop_duplicates(subset=["case_id"], keep="first")

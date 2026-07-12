@@ -1,3 +1,4 @@
+#/project_root/subscript/run_method_comparison.py
 from __future__ import annotations
 
 import argparse

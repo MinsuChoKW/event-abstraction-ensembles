@@ -215,7 +215,7 @@ results/pipeline_runs/
 
 The `subscript/` directory contains scripts used to generate additional tables and figures for the paper.
 
-### EDA
+### Event Log / Abstaced Event Log Comparison
 
 ```bash
 PYTHONPATH=src python subscript/abstraction_comparison.py \

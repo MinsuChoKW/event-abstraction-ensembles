@@ -235,6 +235,15 @@ def build_evaluation_paths(
         exist_ok=True,
     )
 
+    org_evaluation_dir = (
+        org_dir / "evaluation"
+    )
+
+    org_evaluation_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
     return {
         "run_dir": run_dir,
         "discovery_dir": discovery_dir,
@@ -281,6 +290,18 @@ def build_evaluation_paths(
         "org_meta": (
             org_dir
             / "ORG_petri.net_meta.json"
+        ),
+
+        "org_evaluation_dir": org_evaluation_dir,
+
+        "org_conformance_summary": (
+            org_evaluation_dir
+            / f"org_conformance_summary_rank{rank}.csv"
+        ),
+
+        "org_conformance_details": (
+            org_evaluation_dir
+            / f"org_conformance_details_rank{rank}.json"
         ),
 
         "summary_csv": (
@@ -457,6 +478,522 @@ def load_or_create_org_model(
         True,
     )
 
+
+SUMMARY_COLUMNS = [
+    "model_type",
+    "log_type",
+    "jump",
+    "K",
+    "rank",
+    "label",
+    "cases",
+    "events",
+    "precision",
+    "recall_fitness",
+    "f1",
+    "log_fitness",
+    "percentage_of_fitting_traces",
+    "fitness_method",
+    "precision_method",
+    "noise_threshold",
+    "model_path",
+]
+
+
+def make_summary_frame(
+    results: List[Dict[str, Any]],
+) -> pd.DataFrame:
+    frame = pd.DataFrame(
+        results
+    )
+
+    for column in SUMMARY_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = None
+
+    return frame[
+        SUMMARY_COLUMNS
+    ]
+
+
+def org_conformance_matches(
+    result: Dict[str, Any],
+    *,
+    original_full_summary: Dict[str, Any],
+    org_noise: float,
+    org_pnml_path: str | Path,
+) -> bool:
+    try:
+        if str(result.get("model_type")) != "ORG":
+            return False
+
+        if int(result.get("cases")) != int(
+            original_full_summary["n_cases"]
+        ):
+            return False
+
+        if int(result.get("events")) != int(
+            original_full_summary["n_events"]
+        ):
+            return False
+
+        if not float_equal(
+            result.get("noise_threshold"),
+            org_noise,
+        ):
+            return False
+
+        saved_model_path = str(
+            result.get("model_path", "")
+        )
+
+        if (
+            saved_model_path
+            and saved_model_path != str(org_pnml_path)
+        ):
+            return False
+
+    except (TypeError, ValueError):
+        return False
+
+    return True
+
+
+def load_saved_org_conformance(
+    paths: Dict[str, Path],
+    *,
+    original_full_summary: Dict[str, Any],
+    org_noise: float,
+) -> Dict[str, Any] | None:
+    details_path = paths[
+        "org_conformance_details"
+    ]
+
+    if details_path.exists():
+        try:
+            payload = load_json(
+                details_path
+            )
+
+            result = payload.get(
+                "result",
+                payload,
+            )
+
+            if (
+                isinstance(result, dict)
+                and org_conformance_matches(
+                    result,
+                    original_full_summary=(
+                        original_full_summary
+                    ),
+                    org_noise=org_noise,
+                    org_pnml_path=paths["org_pnml"],
+                )
+            ):
+                print(
+                    "[Stage06:ORG] Reusing saved ORG "
+                    "conformance result."
+                )
+                print(
+                    "[Stage06:ORG] details:",
+                    details_path,
+                )
+                return dict(result)
+
+        except Exception as exc:
+            print(
+                "[Stage06:ORG] Failed to read saved "
+                f"ORG conformance: {exc}"
+            )
+
+    summary_path = paths[
+        "org_conformance_summary"
+    ]
+
+    if summary_path.exists():
+        try:
+            frame = pd.read_csv(
+                summary_path
+            )
+
+            if "model_type" not in frame.columns:
+                return None
+
+            org_rows = frame[
+                frame["model_type"].astype(str)
+                == "ORG"
+            ]
+
+            if org_rows.empty:
+                return None
+
+            result = org_rows.iloc[0].to_dict()
+
+            if org_conformance_matches(
+                result,
+                original_full_summary=(
+                    original_full_summary
+                ),
+                org_noise=org_noise,
+                org_pnml_path=paths["org_pnml"],
+            ):
+                print(
+                    "[Stage06:ORG] Reusing saved ORG "
+                    "conformance summary."
+                )
+                print(
+                    "[Stage06:ORG] summary:",
+                    summary_path,
+                )
+                return dict(result)
+
+        except Exception as exc:
+            print(
+                "[Stage06:ORG] Failed to read saved "
+                f"ORG conformance summary: {exc}"
+            )
+
+    return None
+
+
+def save_org_conformance(
+    paths: Dict[str, Path],
+    *,
+    cfg: Dict[str, Any],
+    rank: int,
+    original_full_summary: Dict[str, Any],
+    org_noise: float,
+    result_org: Dict[str, Any],
+) -> None:
+    make_summary_frame(
+        [result_org]
+    ).to_csv(
+        paths["org_conformance_summary"],
+        index=False,
+        encoding="utf-8",
+    )
+
+    payload = {
+        "status": "completed",
+        "created_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "dataset": str(
+            cfg["dataset"]["name"]
+        ),
+        "rank": int(rank),
+        "org_noise": float(org_noise),
+        "original_full_summary": (
+            original_full_summary
+        ),
+        "model_path": str(
+            paths["org_pnml"]
+        ),
+        "result": result_org,
+        "outputs": {
+            "summary_csv": str(
+                paths["org_conformance_summary"]
+            ),
+            "details_json": str(
+                paths["org_conformance_details"]
+            ),
+        },
+    }
+
+    save_json(
+        paths["org_conformance_details"],
+        payload,
+    )
+
+    print(
+        "[Stage06:ORG] Saved ORG conformance summary:",
+        paths["org_conformance_summary"],
+    )
+    print(
+        "[Stage06:ORG] Saved ORG conformance details:",
+        paths["org_conformance_details"],
+    )
+
+
+def load_or_compute_org_conformance(
+    cfg: Dict[str, Any],
+    paths: Dict[str, Path],
+    original_full_log,
+    org_net,
+    org_initial_marking,
+    org_final_marking,
+    *,
+    rank: int,
+    org_noise: float,
+    original_full_summary: Dict[str, Any],
+    org_conformance_cache: Dict[
+        tuple[Any, ...],
+        Dict[str, Any],
+    ] | None,
+) -> Dict[str, Any]:
+    org_cache_key = (
+        "ORG",
+        str(cfg["dataset"]["name"]),
+        int(original_full_summary["n_cases"]),
+        int(original_full_summary["n_events"]),
+        float(org_noise),
+        str(paths["org_pnml"]),
+    )
+
+    if (
+        org_conformance_cache is not None
+        and org_cache_key in org_conformance_cache
+    ):
+        print(
+            "[Stage06:ORG] Reusing in-memory ORG "
+            "conformance result."
+        )
+        return dict(
+            org_conformance_cache[org_cache_key]
+        )
+
+    saved_result = load_saved_org_conformance(
+        paths,
+        original_full_summary=original_full_summary,
+        org_noise=org_noise,
+    )
+
+    if saved_result is not None:
+        if org_conformance_cache is not None:
+            org_conformance_cache[
+                org_cache_key
+            ] = dict(saved_result)
+
+        return saved_result
+
+    print(
+        "[Stage06:ORG] No saved ORG conformance result."
+    )
+    print(
+        "[Stage06:ORG] Computing ORG conformance."
+    )
+
+    result_org = evaluate_precision_fitness_f1(
+        original_full_log,
+        org_net,
+        org_initial_marking,
+        org_final_marking,
+        label=(
+            "ORG: model(org) "
+            "vs log(org)"
+        ),
+    )
+
+    result_org.update(
+        {
+            "model_type": "ORG",
+            "log_type": "original_full",
+            "jump": None,
+            "K": None,
+            "rank": None,
+            "cases": int(
+                original_full_summary[
+                    "n_cases"
+                ]
+            ),
+            "events": int(
+                original_full_summary[
+                    "n_events"
+                ]
+            ),
+            "noise_threshold": float(
+                org_noise
+            ),
+            "model_path": str(
+                paths["org_pnml"]
+            ),
+        }
+    )
+
+    save_org_conformance(
+        paths,
+        cfg=cfg,
+        rank=rank,
+        original_full_summary=(
+            original_full_summary
+        ),
+        org_noise=org_noise,
+        result_org=result_org,
+    )
+
+    if org_conformance_cache is not None:
+        org_conformance_cache[
+            org_cache_key
+        ] = dict(result_org)
+
+    return result_org
+
+
+def build_stage06_aggregate_paths(
+    cfg: Dict[str, Any],
+    *,
+    rank: int,
+) -> Dict[str, Path]:
+    k_values = [
+        int(value)
+        for value in cfg["abstraction"]["k_values"]
+    ]
+    jump_values = [
+        int(value)
+        for value in cfg["abstraction"]["jump_values"]
+    ]
+
+    sample_paths = build_evaluation_paths(
+        cfg,
+        k=k_values[0],
+        jump=jump_values[0],
+        rank=rank,
+    )
+
+    results_root = Path(
+        cfg["results"]["root_dir"]
+    )
+
+    dataset_name = str(
+        cfg["dataset"]["name"]
+    )
+
+    relative_run_dir = (
+        sample_paths["run_dir"]
+        .relative_to(
+            results_root
+            / "runs"
+            / dataset_name
+        )
+    )
+
+    # Keep:
+    #   {dictionary_variant}/method-{method}/match-{direction}
+    aggregate_parts = relative_run_dir.parts[:3]
+
+    aggregate_dir = (
+        results_root
+        / "summaries"
+        / dataset_name
+        / Path(*aggregate_parts)
+    )
+
+    aggregate_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    return {
+        "aggregate_dir": aggregate_dir,
+        "summary_csv": (
+            aggregate_dir
+            / f"conformance_summary_rank{rank}.csv"
+        ),
+        "details_json": (
+            aggregate_dir
+            / f"conformance_details_rank{rank}.json"
+        ),
+    }
+
+
+def save_stage06_aggregate_summary(
+    cfg: Dict[str, Any],
+    *,
+    rank: int,
+    reports: List[Dict[str, Any]],
+) -> None:
+    if not reports:
+        return
+
+    rows: List[Dict[str, Any]] = []
+
+    org_result = reports[0].get(
+        "org_conformance",
+        {},
+    ).get("result")
+
+    if isinstance(org_result, dict):
+        rows.append(
+            dict(org_result)
+        )
+
+    for report in reports:
+        result_map = report.get(
+            "results",
+            {},
+        )
+
+        for key in ["ABS", "EXP"]:
+            result = result_map.get(key)
+
+            if isinstance(result, dict):
+                rows.append(
+                    dict(result)
+                )
+
+    paths = build_stage06_aggregate_paths(
+        cfg,
+        rank=rank,
+    )
+
+    make_summary_frame(
+        rows
+    ).to_csv(
+        paths["summary_csv"],
+        index=False,
+        encoding="utf-8",
+    )
+
+    save_json(
+        paths["details_json"],
+        {
+            "status": "completed",
+            "created_at": datetime.now().isoformat(
+                timespec="seconds"
+            ),
+            "dataset": str(
+                cfg["dataset"]["name"]
+            ),
+            "method": str(
+                cfg["abstraction_source"]["method"]
+            ),
+            "rank": int(rank),
+            "n_rows": int(len(rows)),
+            "results": rows,
+            "source_stage_reports": [
+                str(
+                    report["outputs"]["stage_report"]
+                )
+                for report in reports
+                if "outputs" in report
+                and "stage_report" in report["outputs"]
+            ],
+            "outputs": {
+                "summary_csv": str(
+                    paths["summary_csv"]
+                ),
+                "details_json": str(
+                    paths["details_json"]
+                ),
+            },
+        },
+    )
+
+    print("=" * 80)
+    print("[Stage06] Aggregate conformance summary")
+    print("=" * 80)
+    print(
+        "[Stage06] summary:",
+        paths["summary_csv"],
+    )
+    print(
+        "[Stage06] details:",
+        paths["details_json"],
+    )
+    print("=" * 80)
+
+
 def run_evaluation_for_setting(
     cfg: Dict[str, Any],
     *,
@@ -464,6 +1001,10 @@ def run_evaluation_for_setting(
     jump: int,
     rank: int = 1,
     org_noise: float = 0.20,
+    org_conformance_cache: Dict[
+        tuple[Any, ...],
+        Dict[str, Any],
+    ] | None = None,
 ) -> Dict[str, Any]:
     """
     Run the original notebook's three conformance evaluations:
@@ -629,47 +1170,20 @@ def run_evaluation_for_setting(
     # 4. Conformance evaluations
     # ========================================================
     print(
-        "[Stage06:4] Evaluating ORG model "
-        "against original full log"
+        "[Stage06:4] Preparing ORG conformance result"
     )
 
-    result_org = (
-        evaluate_precision_fitness_f1(
-            original_full_log,
-            org_net,
-            org_initial_marking,
-            org_final_marking,
-            label=(
-                "ORG: model(org) "
-                "vs log(org)"
-            ),
-        )
-    )
-
-    result_org.update(
-        {
-            "model_type": "ORG",
-            "log_type": "original_full",
-            "jump": None,
-            "K": None,
-            "rank": None,
-            "cases": int(
-                original_full_summary[
-                    "n_cases"
-                ]
-            ),
-            "events": int(
-                original_full_summary[
-                    "n_events"
-                ]
-            ),
-            "noise_threshold": float(
-                org_noise
-            ),
-            "model_path": str(
-                paths["org_pnml"]
-            ),
-        }
+    result_org = load_or_compute_org_conformance(
+        cfg,
+        paths,
+        original_full_log,
+        org_net,
+        org_initial_marking,
+        org_final_marking,
+        rank=rank,
+        org_noise=org_noise,
+        original_full_summary=original_full_summary,
+        org_conformance_cache=org_conformance_cache,
     )
 
     print(
@@ -756,8 +1270,9 @@ def run_evaluation_for_setting(
         }
     )
 
+    # Per-setting outputs store only ABS and EXP.
+    # ORG is stored once under results/org_baseline/{dataset}/evaluation/.
     results = [
-        result_org,
         result_abs,
         result_exp,
     ]
@@ -765,25 +1280,7 @@ def run_evaluation_for_setting(
     # ========================================================
     # 5. Save outputs
     # ========================================================
-    summary_columns = [
-        "model_type",
-        "log_type",
-        "jump",
-        "K",
-        "rank",
-        "label",
-        "cases",
-        "events",
-        "precision",
-        "recall_fitness",
-        "f1",
-        "log_fitness",
-        "percentage_of_fitting_traces",
-        "fitness_method",
-        "precision_method",
-        "noise_threshold",
-        "model_path",
-    ]
+    summary_columns = SUMMARY_COLUMNS
 
     summary_df = pd.DataFrame(
         results
@@ -871,8 +1368,17 @@ def run_evaluation_for_setting(
             },
         },
 
+        "org_conformance": {
+            "summary_csv": str(
+                paths["org_conformance_summary"]
+            ),
+            "details_json": str(
+                paths["org_conformance_details"]
+            ),
+            "result": result_org,
+        },
+
         "results": {
-            "ORG": result_org,
             "ABS": result_abs,
             "EXP": result_exp,
         },
@@ -899,7 +1405,7 @@ def run_evaluation_for_setting(
     print("[Stage06] Evaluation summary")
     print("=" * 80)
 
-    for result in results:
+    for result in [result_org] + results:
         print(
             f"[{result['model_type']}] "
             f"precision={result['precision']:.6f} "
@@ -935,6 +1441,14 @@ def run_evaluation_pipeline(
 ) -> List[Dict[str, Any]]:
     reports: List[Dict[str, Any]] = []
 
+    # ORG baseline is fixed for a given dataset, sample size,
+    # and ORG noise threshold. Therefore, its conformance result
+    # can be reused across K/jump settings within this Stage-06 run.
+    org_conformance_cache: Dict[
+        tuple[Any, ...],
+        Dict[str, Any],
+    ] = {}
+
     for k in cfg["abstraction"]["k_values"]:
         for jump in cfg[
             "abstraction"
@@ -948,8 +1462,17 @@ def run_evaluation_pipeline(
                     org_noise=float(
                         org_noise
                     ),
+                    org_conformance_cache=(
+                        org_conformance_cache
+                    ),
                 )
             )
+
+    save_stage06_aggregate_summary(
+        cfg,
+        rank=rank,
+        reports=reports,
+    )
 
     return reports
 

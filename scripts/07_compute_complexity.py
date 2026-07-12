@@ -121,6 +121,15 @@ def build_complexity_paths(
         / cfg["dataset"]["name"]
     )
 
+    org_complexity_dir = (
+        org_dir / "complexity"
+    )
+
+    org_complexity_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
     return {
         "run_dir": run_dir,
         "discovery_dir": discovery_dir,
@@ -136,9 +145,21 @@ def build_complexity_paths(
             / f"abstract_model_rank{rank}.ptml"
         ),
 
+        "org_complexity_dir": org_complexity_dir,
+
         "org_bpmn": (
-            complexity_dir
+            org_complexity_dir
             / "ORG_model.bpmn"
+        ),
+
+        "org_metrics_csv": (
+            org_complexity_dir
+            / f"org_complexity_metrics_rank{rank}.csv"
+        ),
+
+        "org_metrics_json": (
+            org_complexity_dir
+            / f"org_complexity_metrics_rank{rank}.json"
         ),
 
         "abs_bpmn": (
@@ -268,6 +289,437 @@ def compute_model_row(
     return row
 
 
+
+def make_complexity_frame(
+    rows: List[Dict[str, Any]],
+) -> pd.DataFrame:
+    dataframe = pd.DataFrame(
+        rows
+    )
+
+    for column in COMPLEXITY_COLUMNS:
+        if column not in dataframe.columns:
+            dataframe[column] = None
+
+    return dataframe[
+        COMPLEXITY_COLUMNS
+    ]
+
+
+def org_complexity_matches(
+    row: Dict[str, Any],
+    *,
+    cfg: Dict[str, Any],
+    org_bpmn_path: str | Path,
+) -> bool:
+    if str(row.get("model_type")) != "ORG":
+        return False
+
+    if str(row.get("dataset")) != str(
+        cfg["dataset"]["name"]
+    ):
+        return False
+
+    saved_bpmn_path = str(
+        row.get("bpmn_path", "")
+    )
+
+    if (
+        saved_bpmn_path
+        and saved_bpmn_path != str(org_bpmn_path)
+    ):
+        return False
+
+    return True
+
+
+def load_saved_org_complexity(
+    cfg: Dict[str, Any],
+    paths: Dict[str, Path],
+) -> Dict[str, Any] | None:
+    json_path = paths["org_metrics_json"]
+
+    if json_path.exists():
+        try:
+            payload = json.loads(
+                json_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            row = payload.get(
+                "result",
+                payload,
+            )
+
+            if (
+                isinstance(row, dict)
+                and org_complexity_matches(
+                    row,
+                    cfg=cfg,
+                    org_bpmn_path=paths["org_bpmn"],
+                )
+            ):
+                print(
+                    "[Stage07:ORG] Reusing saved ORG "
+                    "complexity metrics."
+                )
+                print(
+                    "[Stage07:ORG] metrics:",
+                    json_path,
+                )
+                return dict(row)
+
+        except Exception as exc:
+            print(
+                "[Stage07:ORG] Failed to read saved "
+                f"ORG complexity JSON: {exc}"
+            )
+
+    csv_path = paths["org_metrics_csv"]
+
+    if csv_path.exists():
+        try:
+            frame = pd.read_csv(
+                csv_path
+            )
+
+            if "model_type" not in frame.columns:
+                return None
+
+            org_rows = frame[
+                frame["model_type"].astype(str)
+                == "ORG"
+            ]
+
+            if org_rows.empty:
+                return None
+
+            row = org_rows.iloc[0].to_dict()
+
+            if org_complexity_matches(
+                row,
+                cfg=cfg,
+                org_bpmn_path=paths["org_bpmn"],
+            ):
+                print(
+                    "[Stage07:ORG] Reusing saved ORG "
+                    "complexity summary."
+                )
+                print(
+                    "[Stage07:ORG] summary:",
+                    csv_path,
+                )
+                return dict(row)
+
+        except Exception as exc:
+            print(
+                "[Stage07:ORG] Failed to read saved "
+                f"ORG complexity CSV: {exc}"
+            )
+
+    return None
+
+
+def save_org_complexity(
+    paths: Dict[str, Path],
+    *,
+    cfg: Dict[str, Any],
+    rank: int,
+    org_row: Dict[str, Any],
+) -> None:
+    make_complexity_frame(
+        [org_row]
+    ).to_csv(
+        paths["org_metrics_csv"],
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    payload = {
+        "status": "completed",
+        "created_at": datetime.now().isoformat(
+            timespec="seconds"
+        ),
+        "dataset": str(
+            cfg["dataset"]["name"]
+        ),
+        "rank": int(rank),
+        "result": org_row,
+        "outputs": {
+            "org_bpmn": str(
+                paths["org_bpmn"]
+            ),
+            "metrics_csv": str(
+                paths["org_metrics_csv"]
+            ),
+            "metrics_json": str(
+                paths["org_metrics_json"]
+            ),
+        },
+    }
+
+    save_json(
+        paths["org_metrics_json"],
+        payload,
+    )
+
+    print(
+        "[Stage07:ORG] Saved ORG complexity CSV :",
+        paths["org_metrics_csv"],
+    )
+    print(
+        "[Stage07:ORG] Saved ORG complexity JSON:",
+        paths["org_metrics_json"],
+    )
+
+
+def load_or_compute_org_complexity(
+    cfg: Dict[str, Any],
+    paths: Dict[str, Path],
+    *,
+    rank: int,
+    org_complexity_cache: Dict[
+        str,
+        Dict[str, Any],
+    ] | None,
+) -> Dict[str, Any]:
+    cache_key = str(
+        paths["org_bpmn"]
+    )
+
+    if (
+        org_complexity_cache is not None
+        and cache_key in org_complexity_cache
+    ):
+        print(
+            "[Stage07:ORG] Reusing in-memory ORG "
+            "complexity metrics."
+        )
+        return dict(
+            org_complexity_cache[cache_key]
+        )
+
+    saved_row = load_saved_org_complexity(
+        cfg,
+        paths,
+    )
+
+    if saved_row is not None:
+        if org_complexity_cache is not None:
+            org_complexity_cache[
+                cache_key
+            ] = dict(saved_row)
+
+        return saved_row
+
+    print(
+        "[Stage07:ORG] No saved ORG complexity metrics."
+    )
+
+    if not paths["org_bpmn"].exists():
+        print(
+            "[Stage07:ORG] Converting ORG PTML to BPMN"
+        )
+
+        convert_ptml_to_bpmn(
+            paths["org_ptml"],
+            paths["org_bpmn"],
+        )
+    else:
+        print(
+            "[Stage07:ORG] Reusing existing ORG BPMN:",
+            paths["org_bpmn"],
+        )
+
+    print(
+        "[Stage07:ORG] Computing ORG metrics"
+    )
+
+    org_row = compute_model_row(
+        model_type="ORG",
+        bpmn_path=paths["org_bpmn"],
+        cfg=cfg,
+        k=None,
+        jump=None,
+        rank=None,
+    )
+
+    save_org_complexity(
+        paths,
+        cfg=cfg,
+        rank=rank,
+        org_row=org_row,
+    )
+
+    if org_complexity_cache is not None:
+        org_complexity_cache[
+            cache_key
+        ] = dict(org_row)
+
+    return org_row
+
+
+def build_stage07_aggregate_paths(
+    cfg: Dict[str, Any],
+    *,
+    rank: int,
+) -> Dict[str, Path]:
+    k_values = [
+        int(value)
+        for value in cfg["abstraction"]["k_values"]
+    ]
+    jump_values = [
+        int(value)
+        for value in cfg["abstraction"]["jump_values"]
+    ]
+
+    sample_paths = build_complexity_paths(
+        cfg,
+        k=k_values[0],
+        jump=jump_values[0],
+        rank=rank,
+    )
+
+    results_root = resolve_path(
+        cfg,
+        cfg["results"]["root_dir"],
+    )
+
+    dataset_name = str(
+        cfg["dataset"]["name"]
+    )
+
+    relative_run_dir = (
+        sample_paths["run_dir"]
+        .relative_to(
+            results_root
+            / "runs"
+            / dataset_name
+        )
+    )
+
+    aggregate_parts = relative_run_dir.parts[:3]
+
+    aggregate_dir = (
+        results_root
+        / "summaries"
+        / dataset_name
+        / Path(*aggregate_parts)
+    )
+
+    aggregate_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    return {
+        "aggregate_dir": aggregate_dir,
+        "metrics_csv": (
+            aggregate_dir
+            / f"complexity_metrics_rank{rank}.csv"
+        ),
+        "metrics_json": (
+            aggregate_dir
+            / f"complexity_metrics_rank{rank}.json"
+        ),
+    }
+
+
+def save_stage07_aggregate_summary(
+    cfg: Dict[str, Any],
+    *,
+    rank: int,
+    reports: List[Dict[str, Any]],
+) -> None:
+    if not reports:
+        return
+
+    rows: List[Dict[str, Any]] = []
+
+    org_result = reports[0].get(
+        "org_complexity",
+        {},
+    ).get("result")
+
+    if isinstance(org_result, dict):
+        rows.append(
+            dict(org_result)
+        )
+
+    for report in reports:
+        abs_result = report.get(
+            "results",
+            {},
+        ).get("ABS")
+
+        if isinstance(abs_result, dict):
+            rows.append(
+                dict(abs_result)
+            )
+
+    paths = build_stage07_aggregate_paths(
+        cfg,
+        rank=rank,
+    )
+
+    make_complexity_frame(
+        rows
+    ).to_csv(
+        paths["metrics_csv"],
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    save_json(
+        paths["metrics_json"],
+        {
+            "status": "completed",
+            "created_at": datetime.now().isoformat(
+                timespec="seconds"
+            ),
+            "dataset": str(
+                cfg["dataset"]["name"]
+            ),
+            "method": str(
+                cfg["abstraction_source"]["method"]
+            ),
+            "rank": int(rank),
+            "n_rows": int(len(rows)),
+            "results": rows,
+            "source_stage_reports": [
+                str(
+                    report["outputs"]["stage_report"]
+                )
+                for report in reports
+                if "outputs" in report
+                and "stage_report" in report["outputs"]
+            ],
+            "outputs": {
+                "metrics_csv": str(
+                    paths["metrics_csv"]
+                ),
+                "metrics_json": str(
+                    paths["metrics_json"]
+                ),
+            },
+        },
+    )
+
+    print("=" * 80)
+    print("[Stage07] Aggregate complexity summary")
+    print("=" * 80)
+    print(
+        "[Stage07] metrics CSV :",
+        paths["metrics_csv"],
+    )
+    print(
+        "[Stage07] metrics JSON:",
+        paths["metrics_json"],
+    )
+    print("=" * 80)
+
+
 def run_complexity_for_setting(
     cfg: Dict[str, Any],
     *,
@@ -275,6 +727,10 @@ def run_complexity_for_setting(
     jump: int,
     rank: int = 1,
     install_dependencies: bool = False,
+    org_complexity_cache: Dict[
+        str,
+        Dict[str, Any],
+    ] | None = None,
 ) -> Dict[str, Any]:
     paths = build_complexity_paths(
         cfg,
@@ -329,34 +785,25 @@ def run_complexity_for_setting(
             )
 
     # --------------------------------------------------------
-    # 1. PTML -> BPMN
+    # 1. ORG is dataset-level. Load or compute once.
     # --------------------------------------------------------
-    print("[Stage07:1] Converting ORG PTML to BPMN")
+    print("[Stage07:1] Preparing ORG complexity result")
 
-    convert_ptml_to_bpmn(
-        paths["org_ptml"],
-        paths["org_bpmn"],
+    org_row = load_or_compute_org_complexity(
+        cfg,
+        paths,
+        rank=rank,
+        org_complexity_cache=org_complexity_cache,
     )
 
-    print("[Stage07:1] Converting ABS PTML to BPMN")
+    # --------------------------------------------------------
+    # 2. ABS is setting-specific. Convert and compute every time.
+    # --------------------------------------------------------
+    print("[Stage07:2] Converting ABS PTML to BPMN")
 
     convert_ptml_to_bpmn(
         paths["abs_ptml"],
         paths["abs_bpmn"],
-    )
-
-    # --------------------------------------------------------
-    # 2. Compute metrics
-    # --------------------------------------------------------
-    print("[Stage07:2] Computing ORG metrics")
-
-    org_row = compute_model_row(
-        model_type="ORG",
-        bpmn_path=paths["org_bpmn"],
-        cfg=cfg,
-        k=None,
-        jump=None,
-        rank=None,
     )
 
     print("[Stage07:2] Computing ABS metrics")
@@ -370,23 +817,18 @@ def run_complexity_for_setting(
         rank=int(rank),
     )
 
+    # Per-setting outputs store only ABS.
+    # ORG is stored once under results/org_baseline/{dataset}/complexity/.
     rows: List[Dict[str, Any]] = [
-        org_row,
         abs_row,
     ]
 
     # --------------------------------------------------------
     # 3. Save outputs
     # --------------------------------------------------------
-    dataframe = pd.DataFrame(rows)
-
-    for column in COMPLEXITY_COLUMNS:
-        if column not in dataframe.columns:
-            dataframe[column] = None
-
-    dataframe = dataframe[
-        COMPLEXITY_COLUMNS
-    ]
+    dataframe = make_complexity_frame(
+        rows
+    )
 
     dataframe.to_csv(
         paths["metrics_csv"],
@@ -439,10 +881,20 @@ def run_complexity_for_setting(
             ),
         },
 
-        "outputs": {
+        "org_complexity": {
             "org_bpmn": str(
                 paths["org_bpmn"]
             ),
+            "metrics_csv": str(
+                paths["org_metrics_csv"]
+            ),
+            "metrics_json": str(
+                paths["org_metrics_json"]
+            ),
+            "result": org_row,
+        },
+
+        "outputs": {
             "abs_bpmn": str(
                 paths["abs_bpmn"]
             ),
@@ -458,7 +910,6 @@ def run_complexity_for_setting(
         },
 
         "results": {
-            "ORG": org_row,
             "ABS": abs_row,
         },
     }
@@ -472,8 +923,12 @@ def run_complexity_for_setting(
     print("[Stage07] Complexity summary")
     print("=" * 80)
 
+    display_dataframe = make_complexity_frame(
+        [org_row] + rows
+    )
+
     print(
-        dataframe[
+        display_dataframe[
             [
                 "model_type",
                 "coef_network_connectivity",
@@ -515,6 +970,11 @@ def run_complexity_pipeline(
 ) -> List[Dict[str, Any]]:
     reports: List[Dict[str, Any]] = []
 
+    org_complexity_cache: Dict[
+        str,
+        Dict[str, Any],
+    ] = {}
+
     first_run = True
 
     for k in cfg["abstraction"]["k_values"]:
@@ -531,10 +991,19 @@ def run_complexity_pipeline(
                         install_dependencies
                         and first_run
                     ),
+                    org_complexity_cache=(
+                        org_complexity_cache
+                    ),
                 )
             )
 
             first_run = False
+
+    save_stage07_aggregate_summary(
+        cfg,
+        rank=rank,
+        reports=reports,
+    )
 
     return reports
 

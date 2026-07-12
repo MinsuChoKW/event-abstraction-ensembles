@@ -1,0 +1,252 @@
+# ============================================================
+# Event Abstraction Ensemble configuration
+# Dataset: BPI Challenge 2012
+#
+# Main configuration for the BPI 2012 ensemble experiment.
+# ============================================================
+
+project:
+  name: event-abstraction-ensemble
+  root_dir: .
+
+# ------------------------------------------------------------
+# 1. Dataset setting
+# ------------------------------------------------------------
+dataset:
+  name: bpi2012
+
+  # Verify the exact filename after placing the cleaned XES file.
+  raw_log_path: data/bpi2012/raw/BPI_Challenge_2012.xes.gz
+
+  columns:
+    case_id: case:concept:name
+    activity: concept:name
+    timestamp: time:timestamp
+
+  processed_dir: data/bpi2012/processed
+  activity_map_file: act2ch.json
+  case_strings_file: case_strings.jsonl.gz
+
+# ------------------------------------------------------------
+# 2. Model-based abstraction setting: LPM
+# ------------------------------------------------------------
+model_based:
+  enabled: true
+
+  raw_lpm_dir: data/bpi2012/raw/LPM_PN_Set
+
+  ptml_dir: data/bpi2012/interim/LPM_PT_ver
+  path_dir: data/bpi2012/interim/LPM_Path
+
+  # TODO:
+  # Insert the exact BPI 2012 LPM group list used in the
+  # original experiment. Do not reuse the BPIC 2015 groups.
+  #
+  # Example format:
+  # lpm_groups:
+  #   - [1, 4]
+  #   - [2, 7, 13]
+  #   - [3]
+  lpm_groups: [
+    [1, 23, 86],
+    [2, 4, 8],
+    [3, 21, 25, 35, 36, 54],
+    [5, 7, 10],
+    [6, 11, 15],
+    [9, 39],
+    [12, 38, 44],
+    [13, 24],
+    [14, 22, 24, 34, 39, 46, 47, 52, 78, 82],
+    [16, 17, 20, 21, 23, 25, 28, 29, 32, 35, 36, 37, 51, 54, 56, 58, 59, 61, 62, 74, 79, 86, 95],
+    [18, 23, 30, 33, 38, 39, 41, 44, 53, 55, 83, 86, 90, 91, 98],
+    [19, 21, 24, 25, 31, 35, 36, 38, 42, 43, 44, 50, 54, 60, 63, 64, 65, 69, 73, 75, 77, 87, 93, 94, 99, 100],
+    [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
+     53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+     80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100],
+  ]
+
+  # Loop constraint for executable path enumeration.
+  loop_constraint:
+    enabled: true
+    loop_max_iters: 2
+
+  # Remove duplicate executable paths within the LPM-based
+  # dictionary according to the predetermined group order.
+  deduplicate_paths: true
+
+  path_output:
+    raw_template: lpm_group_paths_loop{loop_max_iters}.json
+    dedup_template: lpm_group_paths_loop{loop_max_iters}_remove_dup.json
+
+  # Safety limits for executable-path enumeration.
+  path_enumeration:
+    max_trace_len: 200
+    max_traces_per_lpm: 50000
+
+# ------------------------------------------------------------
+# 3. Instance-based abstraction setting: Session
+# ------------------------------------------------------------
+session_based:
+  enabled: true
+
+  session_split:
+    # Session boundary when the inter-event gap exceeds 8 hours.
+    gap_hours: 8
+
+  clustering:
+    algorithm: dbscan
+
+    # BPI 2012-specific DBSCAN setting.
+    eps: 0.05
+    min_samples: 15
+    metric: euclidean
+
+  output:
+    dir: data/bpi2012/interim/cut_exports
+
+    session_info_file: session_info.json.gz
+    cluster_info_file: session_dbscan_clusters.json.gz
+    cluster_patterns_file: session_dbscan_cluster_patterns.json.gz
+    topk_pattern_template: session_dbscan_cut_topK_K{K:03d}.json
+
+# ------------------------------------------------------------
+# 4. Abstraction dictionary source
+# ------------------------------------------------------------
+abstraction_source:
+  # Options:
+  #   BOTH    : LPM + Session
+  #   LPM     : LPM only
+  #   SESSION : Session only
+  method: SESSION
+
+  label_prefix:
+    lpm: G
+    session: S
+
+# ------------------------------------------------------------
+# 5. Abstraction experiment sweep
+# ------------------------------------------------------------
+abstraction:
+  # BPI 2012 main experiment uses 10,000 cases.
+  n_cases: 10000
+  seed: 42
+
+  # Main fixed-K setting for BPI 2012.
+  #
+  # For the K-sweep experiment, replace this with the exact
+  # candidate list used in the original notebook.
+  k_values: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60]
+
+  # Main fixed-jump setting.
+  #
+  # Jump sweep:
+  # jump_values: [1, 2, 3, 4, 5]
+  jump_values: [5]
+
+  # Forward and backward segment-match construction.
+  use_backward_matching: true
+
+  # The paper uses the rank-1 optimum.
+  # Additional solutions are retained for analysis/debugging.
+  top_k_solutions: 5
+
+# ------------------------------------------------------------
+# 6. Results
+# ------------------------------------------------------------
+results:
+  root_dir: results
+
+  # Example:
+  # results/runs/
+  #   bpi2012/
+  #   dict_loop2/
+  #   method-BOTH/
+  #   match-bidir/
+  #   jump04/
+  #   K015/
+  run_dir_template: >-
+    runs/{dataset_name}/{dictionary_variant}/method-{method}/match-{match_direction}/jump{jump:02d}/K{K:03d}
+
+  summaries_dir: summaries
+  figures_dir: figures
+
+  run_subdirs:
+    - pattern_pool
+    - matching
+    - selection
+    - discovery
+    - evaluation
+    - figures
+
+# ------------------------------------------------------------
+# 7. Generated dictionary variant name
+# ------------------------------------------------------------
+naming:
+  dictionary_variant_template: dict_loop{loop_max_iters}
+
+  match_direction:
+    backward_true: bidir
+    backward_false: fwd
+
+# ============================================================
+# 8. Full pipeline execution
+# ============================================================
+pipeline:
+  stop_on_error: true
+
+  shared:
+    selected_rank: &selected_rank 1
+
+  stages:
+    "01":
+      enabled: true
+      name: prepare_lpm_paths
+      script: scripts/01_prepare_lpm_paths.py
+      args: {}
+
+    "02":
+      enabled: true
+      name: build_session_patterns
+      script: scripts/02_build_session_patterns.py
+      args: {}
+
+    "03":
+      enabled: true
+      name: run_segment_matching
+      script: scripts/03_run_segment_matching.py
+      args: {}
+
+    "04":
+      enabled: true
+      name: select_topk_combinations
+      script: scripts/04_select_topk_combinations.py
+      args: {}
+
+    "05":
+      enabled: true
+      name: discover_models
+      script: scripts/05_discover_models.py
+      args:
+        rank: *selected_rank
+        abstract-noise: 0.20
+        local-noise: 0.0
+        progress-every: 100
+
+    "06":
+      enabled: true
+      name: evaluate_models
+      script: scripts/06_evaluate_models.py
+      args:
+        rank: *selected_rank
+        org-noise: 0.20
+
+    "07":
+      enabled: true
+      name: compute_complexity
+      script: scripts/07_compute_complexity.py
+      args:
+        rank: *selected_rank
+
+        # true: install understandBPMN in a fresh Colab runtime.
+        # false: reuse an already installed package.
+        install-understandbpmn: true
