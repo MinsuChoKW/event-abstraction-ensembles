@@ -67,6 +67,9 @@ This project uses the following public event logs:
 | BPI Challenge 2012 | 4TU.ResearchData | https://doi.org/10.4121/uuid:3926db30-f712-4394-aebc-75976070e91f |
 | BPI Challenge 2015 Municipality 2 | 4TU.ResearchData | https://doi.org/10.4121/uuid:63a8435a-077d-4ece-97cd-2c76d394d99c |
 
+For BPIC 2015, use `activityNameEN` as the activity label.  
+To keep the pipeline modules consistent, prepare the BPIC 2015 XES file by copying the values of `activityNameEN` into `concept:name`. Then keep the activity column in the BPIC 2015 config as `concept:name`. This means that `concept:name` is used by the code, but its values represent `activityNameEN`-based activity labels.
+
 The raw logs should be placed under the paths specified in each YAML config, for example:
 
 ## Data Location
